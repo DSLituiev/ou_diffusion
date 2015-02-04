@@ -1,0 +1,4 @@
+bin
+build
+.fuse_hidden*
+**/.fuse_hidden*
