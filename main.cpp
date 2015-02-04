@@ -9,10 +9,10 @@
 #include "tclap/CmdLine.h"
 #include "Params.h"
 
+// #include "gsl_randist.h"
+
 using namespace std;
 using namespace TCLAP;
-// size_t GRID_X_POINTS;
-
 
 void uint16_to_char(char * out_buffer, const unsigned short int & val){
     out_buffer[0] = (val) & 0xFF;  // low byte
@@ -28,21 +28,29 @@ void array_uint16_to_char(char * out_buffer, unsigned short int * arr, size_t le
 }
 
 // http://stackoverflow.com/questions/7217791/random-numbers-in-c0x
+/*
 int map_x_to_grid(float & x, size_t const & GRID_X_POINTS){
     int x_ = (int) round(x);
     int gg;
     gg = (abs(x_) < GRID_X_POINTS / 2) ? ( GRID_X_POINTS / 2 - x_) : (x_<0 ? 0: GRID_X_POINTS-1);
     return gg;
-    }
+}
 
+int map_x_to_grid(float & x, size_t const & GRID_X_POINTS, float const & GRID_DX){
+    int x_ = (int) round(x / GRID_DX);
+    int gg;
+    gg = (abs(x_) < GRID_X_POINTS / 2) ? ( GRID_X_POINTS / 2 - x_) : (x_<0 ? 0: GRID_X_POINTS-1);
+    return gg;
+}
+*/
+/*
 void elastic_acceleration( float dxdt[], float k, float * positions, size_t N ){
    
     for (size_t nn=0; nn <N; nn++){
         dxdt[nn] = k * positions[nn];
     }
     return;
-}
-
+} */
  
 void init_sql_table(sqlite3pp::database * db, const char run_name [], bool drop){
     if (drop){
@@ -55,10 +63,15 @@ void init_sql_table(sqlite3pp::database * db, const char run_name [], bool drop)
     char sql[256];
     sprintf(sql, "CREATE TABLE IF NOT EXISTS %s ("  \
               "time INT PRIMARY KEY     NOT NULL , " \
-              "grid BLOB);", run_name );
+              "grid BLOB, " \
+              "track1 FLOAT, " \
+              "track2 FLOAT, " \
+              "track3 FLOAT );", run_name );
     try {
-         clog << "[sqlite3 :] " << sql << " >>> " ;
-         clog << db->execute(sql) << endl;
+         if (db->execute(sql)!=0){
+            clog << "[sqlite3 failed:] " << sql << endl;
+            cerr << db->error_msg() << endl;
+         }
     } catch (exception& ex) {
          cerr << ex.what() << endl;
     }
@@ -66,15 +79,17 @@ void init_sql_table(sqlite3pp::database * db, const char run_name [], bool drop)
 
 }
 
-void print_to_db(sqlite3pp::database * db, const char * run_name, unsigned short int * grid_t, size_t & tt, const size_t & GRID_X_POINTS ){
+void print_to_db(sqlite3pp::database * db, const char * run_name, \
+     unsigned short int * grid_t, float *tracks, size_t & tt, const size_t & GRID_X_POINTS ){
+
     char buffer[GRID_X_POINTS*2];
     bool PRINT_FLAG = false;    
     array_uint16_to_char(buffer, grid_t, GRID_X_POINTS);
 
     char sql[256];
     sprintf (sql, "INSERT INTO %s "  \
-                  "(time, grid) " \
-                  "VALUES (:time, :grid) ", \
+                  "(time, grid, track1, track2, track3) " \
+                  "VALUES (:time, :grid, :t1, :t2, :t3) ", \
                    run_name );
 
     sqlite3pp::command cmd( *db, sql);
@@ -82,7 +97,9 @@ void print_to_db(sqlite3pp::database * db, const char * run_name, unsigned short
 //  cmd.bind(":tot_cov", buffer );
 //    int blob_status = cmd.bind(":tot_cov", (void const*) buffer, (int) GRID_X_POINTS*2 );
     int blob_status = cmd.bind(":grid", (void const*) grid_t, (int) GRID_X_POINTS*2 );
-
+    cmd.bind(":t1", tracks[0] );
+    cmd.bind(":t2", tracks[1] );
+    cmd.bind(":t3", tracks[2] );
     try {
         cmd.execute();
     } catch (exception& ex) {
@@ -98,6 +115,7 @@ void print_to_db(sqlite3pp::database * db, const char * run_name, unsigned short
     std::cout << std::endl;
   }
 }
+
 Params * parse_cmd_line(int argc, char *argv[]) {
 
     CmdLine cmdss("Comp Motiv", ' ', "0");
@@ -134,6 +152,15 @@ Params * parse_cmd_line(int argc, char *argv[]) {
             0.0, "float");
     cmdss.add(k_);
 
+    ValueArg<float> f_("f", "friction", "friction coefficient", false,
+            0.0, "float");
+    cmdss.add(f_);
+    
+    ValueArg<float> r_("r", "grid_dx", "grid spacing", false,
+            1.0, "float");
+    cmdss.add(r_);
+
+
     Params * p;
     
     try {
@@ -145,35 +172,19 @@ Params * parse_cmd_line(int argc, char *argv[]) {
         int N = N_.getValue();
         int T = T_.getValue();
         int G = G_.getValue();
-        int D = D_.getValue();
 
-        p = new Params(N, T, G, D, k_.getValue(), dt_.getValue(), l_.getValue().c_str(), output.c_str() );
-
+        if (f_.getValue()>0){
+             p = new Params(N, T, G, D_.getValue(), k_.getValue(), dt_.getValue(), r_.getValue(), f_.getValue(), \
+             l_.getValue().c_str(), output.c_str() );
+        }else{
+            p = new Params(N, T, G, D_.getValue(), k_.getValue(), dt_.getValue(), r_.getValue(), l_.getValue().c_str(), output.c_str() );
+        }
     } catch (ArgException &e) {
         StdOutput out;
         out.failure(cmdss, e);
     }
-return p;
+    return p;
 }
-/*
-void diffusor(){
-    for (size_t nn=0; nn < p->N ; nn++){
-        // theta = std::generate_canonical<double, p->RANDOMNESS_BITS_U>(rnd2) ;
-
-        dr = normal_dist(rnd1);
-
-       // elastic_acceleration(dv, k, particles[tt-1], N);
-
-        // Velocities / momenta
-        x[2*nn] = - p->k * particles[tt-1][nn];
-
-        // positions
-        x[nn] += dv[nn];
-
-        particles[tt][nn] = particles[tt-1][nn] + (dr + velocity_particles[nn]) * p->dt;      
-    };
-}
-*/
 
 int main(int argc, char *argv[]) {
     // char OUT_FILE [] = "plots.db";
@@ -182,9 +193,9 @@ int main(int argc, char *argv[]) {
    
     const Params * p = parse_cmd_line(argc, &*argv);
    
-    cout << "variance : " << p->VARIANCE << endl;
+    // cout << "variance : " << p->VARIANCE << endl;
    
-   // Params p = Params(2000, 5000, 400, 5.0, 0.0, 0.1);
+    // Params p = Params(2000, 5000, 400, 5.0, 0.0, 0.1);
     // params p = params(N, T, GRID_X_POINTS, D, k, dt);
 
     // DATABASE INITIALISATION
@@ -218,7 +229,7 @@ int main(int argc, char *argv[]) {
     }
 
     for (size_t nn=0; nn<p->N ; nn++){
-        grid[0 ][ map_x_to_grid(particles[0][nn], p->GRID_X_POINTS) ]++;
+        grid[0 ][ p->map_x_to_grid(particles[0][nn]) ]++;
     }
     
 /*    for (size_t gg=0; gg < p->GRID_X_POINTS ; gg++){
@@ -228,7 +239,7 @@ int main(int argc, char *argv[]) {
 */
   
     size_t tt = 0;
-    print_to_db( db, p->RUN_NAME_STR.c_str(), grid[tt], tt, p->GRID_X_POINTS);
+    print_to_db( db, p->RUN_NAME_STR.c_str(), grid[tt], particles[tt], tt, p->GRID_X_POINTS);
 /*
     for (size_t gg=0; gg<GRID_X_POINTS ; gg++){
         std::cout << setfill(' ') << setw(3) << grid[0][gg] << "  ";
@@ -240,38 +251,70 @@ int main(int argc, char *argv[]) {
     // Good random seed, good engine
     auto rnd1 = std::mt19937(std::random_device{}());
 //    auto rnd2 = std::mt19937(std::random_device{}());
-
+/*    const gsl_rng_type * gslT;
+    gsl_rng * gslr;
+    gsl_rng_env_setup();
+    gslT = gsl_rng_default;
+    gslr = gsl_rng_alloc(gslT);
+*/    
     float theta;
-    float dr;
-    std::normal_distribution<> normal_dist(0, p->VARIANCE);
-   
+    float dW;
+    float F1y, F2y; // Honeycutt 1992
+
+    std::normal_distribution<> normal_dist(0, 1);
+    
     std::cout << "initialization completed." << std::endl;
     
     cout << grid[tt][0] << "\t" ;
+
+    float dvdx = - p->k * p->dt;
+
     for (size_t tt=1; tt < p->T; tt++){
         for (size_t nn=0; nn < p->N ; nn++){
             // theta = std::generate_canonical<double, p->RANDOMNESS_BITS_U>(rnd2) ;
 
-            dr = normal_dist(rnd1);
+            dW = normal_dist(rnd1);
+             
+        //    gsl_ran_bivariate_gaussian (gslr, double sigma_W, double sigma_U, double rho, &dW, &dU)
 
            // elastic_acceleration(dv, k, particles[tt-1], N);
 
-            dv[nn] = - p->k * particles[tt-1][nn];
+//            dv[nn] = p->drift_term(particles[tt-1][nn]);
 
-            velocity_particles[nn] += dv[nn] * p->dt;
-
-            particles[tt][nn] = particles[tt-1][nn] + (dr + velocity_particles[nn]) * p->dt;
             
-            int grid_point = map_x_to_grid(particles[tt][nn], p->GRID_X_POINTS);
+            // EXPLICIT EULER
+            //particles[tt][nn] = particles[tt-1][nn] + p->diffusion_term(dW) + velocity_particles[nn]  * p->dt;
+            //velocity_particles[nn] +=  p->drift_term_velocity(particles[tt-1][nn]) * p->dt;
+ 
+            // Milstein 
+            //  p->sqrt_dt * p->dt * dW * dvdx * 1/2 + \
+            //  p->dt * p->dt * 1/2* dvdx *  velocity_particles[nn] ;
 
-            grid[tt][map_x_to_grid(particles[tt][nn], p->GRID_X_POINTS)]++; 
+            // Euler - Heun
+            // particles[tt][nn] = particles[tt-1][nn] + dW * p->sqrt_dt  + velocity_particles[nn] * p->dt;
+
+            // Runge-Kutta-Honeycutt
+            
+            particles[tt][nn] = particles[tt-1][nn] + p->dt * velocity_particles[nn] ; 
+
+            velocity_particles[nn] += p->dt * p->drift_term_velocity(particles[tt-1][nn], velocity_particles[nn]) \
+                                    + p->diffusion_term( dW );
+            
+//             int grid_point = p->map_x_to_grid( particles[tt][nn] );
+
+             grid[tt][ p->map_x_to_grid( particles[tt][nn] ) ]++; 
         };
-       
-        print_to_db( db, p->RUN_NAME_STR.c_str(), grid[tt], tt , p->GRID_X_POINTS);
-        if (tt % 100 == 0){
-            cout << '\r' <<  setfill(' ') << setw(5)  << tt;
-        }
+//        cout << ' ' <<  setfill(' ') << setw(5)  << tt;
+        printf( " %1.3f | ", particles[tt][20]);
+        if (tt % 10 == 0){ cout << endl;}
+
+        print_to_db( db, p->RUN_NAME_STR.c_str(), grid[tt], particles[tt], tt , p->GRID_X_POINTS);
+//        if (tt % 100 == 0){
+//            cout << '\r' <<  setfill(' ') << setw(5)  << tt;
+//        }
     }
+
+    //gsl_rng_free (gslr); // GSL random number generator
 
     xct->commit(); 
     
