@@ -129,7 +129,7 @@ Params * parse_cmd_line(int argc, char *argv[]) {
     cmdss.add(N_);
 
     ValueArg<string> l_("l", "label", "run / table label", false,
-            "simple", "float");
+            "simple", "string");
     cmdss.add(l_);
 
     ValueArg<int> T_("t", "time", "time points", true,
